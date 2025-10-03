@@ -7,7 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-  
+
 /* See [8254] for hardware details of the 8254 timer chip. */
 
 #if TIMER_FREQ < 19
@@ -19,6 +19,7 @@
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
+struct list sleep_list;
 
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
@@ -37,6 +38,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init(&sleep_list);  
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -84,16 +86,36 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
+void compare_func(struct list_elem* l1, struct list_elem* l2){
+
+  //struct list_elem *first_list_element = list_begin (&sleep_list);
+  struct thread *t = list_entry(l1, struct thread, elem);
+
+
+  
+}
+
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
 timer_sleep (int64_t ticks) 
 {
+
   int64_t start = timer_ticks ();
 
+  int64_t wake_up_time = start + ticks;
+
+  struct thread* current_thread = thread_current();
+  current_thread -> wakeup_time = wake_up_time;
+
+  // Push current thread to list
+  list_push_back (&sleep_list, &current_thread->elem);
+
+
+  thread_block();
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -170,8 +192,29 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+  int64_t start = timer_ticks ();
+
+  // traverse the list
+  struct list_elem *current_elem = list_begin(&sleep_list);
+  struct list_elem *tail = list_tail(&sleep_list);
+  
+  while(current_elem != tail){
+
+    struct thread *t = list_entry(current_elem, struct thread, elem);
+    if (t->wakeup_time <= start){
+      //list_remove(t);
+      thread_unblock(t);
+      
+    }
+
+
+    current_elem = list_next(current_elem);
+  }
+
+
   ticks++;
   thread_tick ();
+  
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -234,6 +277,7 @@ real_time_sleep (int64_t num, int32_t denom)
       real_time_delay (num, denom); 
     }
 }
+
 
 /* Busy-wait for approximately NUM/DENOM seconds. */
 static void
