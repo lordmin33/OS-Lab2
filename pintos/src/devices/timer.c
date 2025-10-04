@@ -24,12 +24,14 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+struct list sleeping_threads;
+
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-
+bool oder_threads_increasing_order(const struct list_elem *a,const struct list_elem *b, void *aux );
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -37,6 +39,8 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+
+  list_init(&sleeping_threads);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -89,11 +93,28 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
+  if (ticks <= 0)
+    return;
+  // int64_t start = timer_ticks ();
+  // int64_t start = ticks + timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  // while (timer_elapsed (start) < ticks) 
+  //   thread_yield ();
+
+
+  enum intr_level old_level = intr_disable ();
+  // enum intr_level old_level = intr_enable();
+  struct thread *current_thread = thread_current ();
+  current_thread->wakeup_time = timer_ticks() + ticks;
+  list_insert_ordered (&sleeping_threads, &current_thread->elem, oder_threads_increasing_order, NULL);
+
+  thread_block ();
+  intr_set_level (old_level);
+
+// timer_init (void) // maybe change this
+// schedule(); // maybe use this, in thread.c
+// timer_interrupt (struct intr_frameargs UNUSED); // an external interupt, probably want to change this.
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -119,7 +140,7 @@ timer_nsleep (int64_t ns)
 {
   real_time_sleep (ns, 1000 * 1000 * 1000);
 }
-
+//----------------------------------------------------------------------------- busy waiting --------------------------------------------------------------//
 /* Busy-waits for approximately MS milliseconds.  Interrupts need
    not be turned on.
 
@@ -170,9 +191,27 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
-  ticks++;
-  thread_tick ();
+  int64_t start = timer_ticks ();
+
+  // traverse the list
+  struct list_elem *current_elem = list_begin(&sleeping_threads);
+  struct list_elem *tail = list_tail(&sleeping_threads);
+  
+  while(current_elem != tail){
+
+    struct thread *t = list_entry(current_elem, struct thread, elem);
+    if (t->wakeup_time <= start){
+      //list_remove(t);
+      thread_unblock(t);
+      
+    }
+
+
+    current_elem = list_next(current_elem);
+  }
 }
+
+
 
 /* Returns true if LOOPS iterations waits for more than one timer
    tick, otherwise false. */
@@ -243,4 +282,13 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+}
+
+
+/**/
+bool oder_threads_increasing_order(const struct list_elem *a,const struct list_elem *b, void *aux )
+{
+    struct thread *t1 = list_entry(a, struct thread, elem);
+    struct thread *t2 = list_entry(b, struct thread, elem);
+    return t1->wakeup_time < t2->wakeup_time;
 }
