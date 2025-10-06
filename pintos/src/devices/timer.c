@@ -93,28 +93,19 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  if (ticks <= 0)
+  if (ticks <= 0) /*If the given ticks is less or equal to 0 then don't put the thread to sleep*/
     return;
-  // int64_t start = timer_ticks ();
-  // int64_t start = ticks + timer_ticks ();
-
   ASSERT (intr_get_level () == INTR_ON);
-  // while (timer_elapsed (start) < ticks) 
-  //   thread_yield ();
 
 
-  enum intr_level old_level = intr_disable ();
-  // enum intr_level old_level = intr_enable();
+  enum intr_level old_level = intr_disable (); /* Need to turn interupt off for thread_block*/
+
   struct thread *current_thread = thread_current ();
-  current_thread->wakeup_time = timer_ticks() + ticks;
-  list_insert_ordered (&sleeping_threads, &current_thread->elem, oder_threads_increasing_order, NULL);
+  current_thread->wakeup_time = timer_ticks () + ticks;
+  list_insert_ordered (&sleeping_threads, &current_thread->elem, oder_threads_increasing_order, NULL); /* */
 
   thread_block ();
   intr_set_level (old_level);
-
-// timer_init (void) // maybe change this
-// schedule(); // maybe use this, in thread.c
-// timer_interrupt (struct intr_frameargs UNUSED); // an external interupt, probably want to change this.
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -140,7 +131,7 @@ timer_nsleep (int64_t ns)
 {
   real_time_sleep (ns, 1000 * 1000 * 1000);
 }
-//----------------------------------------------------------------------------- busy waiting --------------------------------------------------------------//
+
 /* Busy-waits for approximately MS milliseconds.  Interrupts need
    not be turned on.
 
@@ -191,23 +182,24 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
-  int64_t start = timer_ticks ();
+  ticks++;
+  thread_tick();
+ 
 
-  // traverse the list
-  struct list_elem *current_elem = list_begin(&sleeping_threads);
-  struct list_elem *tail = list_tail(&sleeping_threads);
+  /* traverse the list */
+  struct list_elem *current_elem = list_begin (&sleeping_threads);
+  struct list_elem *tail = list_tail (&sleeping_threads);
   
-  while(current_elem != tail){
-
-    struct thread *t = list_entry(current_elem, struct thread, elem);
-    if (t->wakeup_time <= start){
-      //list_remove(t);
-      thread_unblock(t);
-      
+  while(current_elem != tail)
+  {
+    struct thread *t = list_entry (current_elem, struct thread, elem);
+    if (t->wakeup_time <= ticks)
+    {
+      current_elem = list_remove (current_elem);
+      thread_unblock (t);
     }
-
-
-    current_elem = list_next(current_elem);
+    else
+      break; /*no more threads that can be woken up*/
   }
 }
 
@@ -285,8 +277,8 @@ real_time_delay (int64_t num, int32_t denom)
 }
 
 
-/**/
-bool oder_threads_increasing_order(const struct list_elem *a,const struct list_elem *b, void *aux )
+/* How to order sleeping_threads in incresing wakeup_time order*/
+bool oder_threads_increasing_order (const struct list_elem *a,const struct list_elem *b, void *aux )
 {
     struct thread *t1 = list_entry(a, struct thread, elem);
     struct thread *t2 = list_entry(b, struct thread, elem);
