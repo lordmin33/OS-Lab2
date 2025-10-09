@@ -24,6 +24,7 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+/* List of all sleeping threads. */
 struct list sleeping_threads;
 
 static intr_handler_func timer_interrupt;
@@ -184,12 +185,15 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick();
- 
+  /* Check if the list is empty */
+  if (list_empty(&sleeping_threads))
+    return;
 
-  /* traverse the list */
+  /* Traverse the list */
   struct list_elem *current_elem = list_begin (&sleeping_threads);
   struct list_elem *tail = list_tail (&sleeping_threads);
   
+  /* Loop through as many threads as needed until. */
   while(current_elem != tail)
   {
     struct thread *t = list_entry (current_elem, struct thread, elem);
@@ -199,7 +203,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
       thread_unblock (t);
     }
     else
-      break; /*no more threads that can be woken up*/
+      break; /* No more threads that can be woken up. */
   }
 }
 
@@ -277,7 +281,7 @@ real_time_delay (int64_t num, int32_t denom)
 }
 
 
-/* How to order sleeping_threads in incresing wakeup_time order*/
+/* Order sleeping_threads in incresing wakeup_time order*/
 bool oder_threads_increasing_order (const struct list_elem *a,const struct list_elem *b, void *aux )
 {
     struct thread *t1 = list_entry(a, struct thread, elem);
