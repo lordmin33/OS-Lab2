@@ -94,12 +94,13 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  if (ticks <= 0) /*If the given ticks is less or equal to 0 then don't put the thread to sleep*/
+  /*If the given ticks is less or equal to 0 then don't put the thread to sleep. */
+  if (ticks <= 0) 
     return;
+  
   ASSERT (intr_get_level () == INTR_ON);
-
-
-  enum intr_level old_level = intr_disable (); /* Need to turn interupt off for thread_block*/
+  /* Need to turn interupt off for thread_block*/
+  enum intr_level old_level = intr_disable (); 
 
   struct thread *current_thread = thread_current ();
   current_thread->wakeup_time = timer_ticks () + ticks;
@@ -185,11 +186,11 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick();
-  /* Check if the list is empty */
+  /* Check if the list is empty. */
   if (list_empty(&sleeping_threads))
     return;
 
-  /* Traverse the list */
+  /* Traverse the list. */
   struct list_elem *current_elem = list_begin (&sleeping_threads);
   struct list_elem *tail = list_tail (&sleeping_threads);
   
@@ -203,7 +204,8 @@ timer_interrupt (struct intr_frame *args UNUSED)
       thread_unblock (t);
     }
     else
-      break; /* No more threads that can be woken up. */
+      /* No more threads that can be woken up. */
+      break; 
   }
 }
 
@@ -281,7 +283,7 @@ real_time_delay (int64_t num, int32_t denom)
 }
 
 
-/* Order sleeping_threads in incresing wakeup_time order*/
+/* Order sleeping_threads in incresing wakeup_time order. */
 bool oder_threads_increasing_order (const struct list_elem *a,const struct list_elem *b, void *aux )
 {
     struct thread *t1 = list_entry(a, struct thread, elem);
