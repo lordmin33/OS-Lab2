@@ -36,6 +36,20 @@
 
 #define BUS_CAPACITY 3
 
+/* Locks */
+static struct lock *l1;
+static struct lock *l2;
+static struct lock *l3;
+/* Conditions */
+static struct condition *c1;
+static struct condition *c2;
+static struct condition *c3;
+/* other global variable*/
+static int on_bus;
+static int current_direction;
+static int waiters[2];
+
+
 typedef enum {
   SEND,
   RECEIVE,
@@ -78,10 +92,17 @@ static void release_slot (const task_t *task);
 
 void init_bus (void) {
 
-  random_init ((unsigned int)123456789);
+  rrandom_init ((unsigned int)123456789);
 
   /* TODO: Initialize global/static variables,
      e.g. your condition variables, locks, counters etc */
+
+    lock_init(l1);
+    cond_init(c1);
+    cond_init(c2);
+    on_bus = 0;
+  current_direction = -1; /* Bus yet to be used */
+  waiters[0] = waiters[1] = 0; /* waiters[] counts PRIORITY waiters per direction */
 }
 
 void batch_scheduler (unsigned int num_priority_send,
@@ -188,6 +209,18 @@ void get_slot (const task_t *task) {
    * feel free to schedule priority tasks of the same direction,
    * even if there are priority tasks of the other direction waiting
    */
+
+
+ 
+  lock_acquire(l1);
+  while ((on_bus == 3) || (on_bus > 0 && current_direction != task->direction)) { // while can't get on the bridge, wait
+  waiters[task->direction]++;
+  cond_wait(&waitingToGo[current_direction], l1);
+  waiters[task->direction]--;
+  }
+  on_bus++; // get on the bridge
+  current_direction = task->direction;
+  lock_release(l1);
 }
 
 void transfer_data (const task_t *task) {
@@ -201,4 +234,16 @@ void release_slot (const task_t *task) {
    *       - Do you need to notify any waiting task?
    *       - Do you need to increment/decrement any counter?
    */
-}
+
+  // use condition here for recieving?
+
+
+  lock_acquire(l1);
+  on_bus--; // get off the bridge
+  if (waiters[current_direction] > 0) // if anybody wants to go the same direction, wake them
+  cond_signal(&waitingToGo[current_direction], l1);
+  else if (on_bus == 0) // else if empty, try to wake somebody going the other way
+  cond_broadcast(&waitingToGo[1-current_direction], l1);
+  lock_release(l1);
+
+  }
