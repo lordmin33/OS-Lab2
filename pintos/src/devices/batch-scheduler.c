@@ -97,10 +97,11 @@ void init_bus (void) {
   /* TODO: Initialize global/static variables,
      e.g. your condition variables, locks, counters etc */
 
-    lock_init(l1);
-    cond_init(&c1);
-    cond_init(c2);
-    on_bus = 0;
+  lock_init(l1);
+  cond_init(&c1);
+  cond_init(c2);
+  
+  on_bus = 0;
   current_direction = -1; /* Bus yet to be used */
   waiters[0] = waiters[1] = 0; /* waiters[] counts PRIORITY waiters per direction */
 }
@@ -210,9 +211,21 @@ void get_slot (const task_t *task) {
    * even if there are priority tasks of the other direction waiting
    */
 
-
- 
   lock_acquire(l1);
+  if(task->priority == PRIORITY)
+  {
+    while ((on_bus == 3) || (on_bus > 0 && current_direction != task->direction)) { // while can't get on the bridge, wait
+    waiters[task->direction]++;
+    cond_wait(&c2[current_direction], l1);
+    waiters[task->direction]--;
+  }
+
+  }
+  else
+  {
+
+
+  }
   while ((on_bus == 3) || (on_bus > 0 && current_direction != task->direction)) { // while can't get on the bridge, wait
   waiters[task->direction]++;
   cond_wait(&c2[current_direction], l1);
