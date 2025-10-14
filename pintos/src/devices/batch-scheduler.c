@@ -37,17 +37,18 @@
 #define BUS_CAPACITY 3
 
 /* Locks */
-static struct lock *l1;
+static struct lock l1;
 static struct lock *l2;
 static struct lock *l3;
 /* Conditions */
-static struct condition c1;
-static struct condition *c2;
+static struct condition c1[2];
+static struct condition c2[2];
 static struct condition *c3;
 /* other global variable*/
 static int on_bus;
 static int current_direction;
 static int waiters[2];
+static int waitersPriority[2];
 
 
 typedef enum {
@@ -92,18 +93,21 @@ static void release_slot (const task_t *task);
 
 void init_bus (void) {
 
-  rrandom_init ((unsigned int)123456789);
+  random_init ((unsigned int)123456789);
 
   /* TODO: Initialize global/static variables,
      e.g. your condition variables, locks, counters etc */
 
-  lock_init(l1);
+  // l1 = malloc(sizeof *l1)
+  lock_init(&l1);
   cond_init(&c1);
-  cond_init(c2);
+  cond_init(&c2);
   
+
   on_bus = 0;
   current_direction = -1; /* Bus yet to be used */
   waiters[0] = waiters[1] = 0; /* waiters[] counts PRIORITY waiters per direction */
+  waitersPriority[0] = waitersPriority[1] = 0;
 }
 
 void batch_scheduler (unsigned int num_priority_send,
@@ -197,6 +201,7 @@ static direction_t other_direction(direction_t this_direction) {
   return this_direction == SEND ? RECEIVE : SEND;
 }
 
+
 void get_slot (const task_t *task) {
 
   /* TODO: Try to get a slot, respect the following rules:
@@ -211,12 +216,55 @@ void get_slot (const task_t *task) {
    * even if there are priority tasks of the other direction waiting
    */
 
-  lock_acquire(l1);
+  lock_acquire(&l1);
+  
+  while ((on_bus == 3) || (on_bus > 0 && current_direction != task->direction)) { // while can't get on the bridge, wait
+    
+    if (task->priority == PRIORITY){
+      waitersPriority[task->direction]++;
+      cond_wait(&c1[current_direction],&l1);
+      waitersPriority[task->direction]--;
+
+    }
+
+    else{
+      waiters[task->direction]++;
+  
+      cond_wait(&c2[current_direction], &l1);
+    
+      waiters[task->direction]--;
+    }
+    
+  }
+
+  on_bus++; // get on the bridge
+  current_direction = task->direction;
+  lock_release(&l1);
+}
+
+
+
+
+void get_slot2 (const task_t *task) {
+
+  /* TODO: Try to get a slot, respect the following rules:
+   *        1. There can be only BUS_CAPACITY tasks using the bus
+   *        2. The bus is half-duplex: All tasks using the bus should be either
+   * sending or receiving
+   *        3. A normal task should not get the bus if there are priority tasks
+   * waiting
+   *
+   * You do not need to guarantee fairness or freedom from starvation:
+   * feel free to schedule priority tasks of the same direction,
+   * even if there are priority tasks of the other direction waiting
+   */
+
+  lock_acquire(&l1);
   if(task->priority == PRIORITY)
   {
     while ((on_bus == 3) || (on_bus > 0 && current_direction != task->direction)) { // while can't get on the bridge, wait
     waiters[task->direction]++;
-    cond_wait(&c2[current_direction], l1);
+    cond_wait(&c2[current_direction], &l1);
     waiters[task->direction]--;
   }
 
@@ -228,12 +276,12 @@ void get_slot (const task_t *task) {
   }
   while ((on_bus == 3) || (on_bus > 0 && current_direction != task->direction)) { // while can't get on the bridge, wait
   waiters[task->direction]++;
-  cond_wait(&c2[current_direction], l1);
+  cond_wait(&c2[current_direction], &l1);
   waiters[task->direction]--;
   }
   on_bus++; // get on the bridge
   current_direction = task->direction;
-  lock_release(l1);
+  lock_release(&l1);
 }
 
 void transfer_data (const task_t *task) {
@@ -251,12 +299,30 @@ void release_slot (const task_t *task) {
   // use condition here for recieving?
 
 
-  lock_acquire(l1);
+  lock_acquire(&l1);
   on_bus--; // get off the bridge
+
+  if(waitersPriority[current_direction] > 0){
+    cond_signal(&c1[current_direction], &l1);
+
+  }
+
+  if (waitersPriority[1-current_direction] > 0){
+    cond_broadcast(&c1[1-current_direction],&l1);
+  }
+
+  
+
   if (waiters[current_direction] > 0) // if anybody wants to go the same direction, wake them
-  cond_signal(&c2[current_direction], l1);
+  cond_signal(&c2[current_direction], &l1);
   else if (on_bus == 0) // else if empty, try to wake somebody going the other way
-  cond_broadcast(&c2[1-current_direction], l1);
-  lock_release(l1);
+  
+  // If theres a non priority waiting for the other direction
+  if (waiters[1-current_direction] > 0){
+    cond_broadcast(&c2[1-current_direction], &l1);
+  }
+    
+
+  lock_release(&l1);
 
   }
