@@ -36,18 +36,6 @@
 
 #define BUS_CAPACITY 3
 
-/* Locks */
-static struct lock l1;
-/* Conditions */
-static struct condition c1[2];
-static struct condition c2[2];
-/* other global variable*/
-static int on_bus;
-static int current_direction;
-static int waitersNormal[2];
-static int waitersPriority[2];
-
-
 typedef enum {
   SEND,
   RECEIVE,
@@ -67,6 +55,17 @@ typedef struct {
   priority_t priority;
   unsigned long transfer_duration;
 } task_t;
+
+/* Locks */
+static struct lock bus_lock;
+/* Conditions */
+static struct condition c_prio[2];
+static struct condition c_norm[2];
+/* other global variable*/
+static int on_bus;
+static int current_direction;
+static int waiters_normal[2];
+static int waiters_priority[2];
 
 void init_bus (void);
 void batch_scheduler (unsigned int num_priority_send,
@@ -92,20 +91,17 @@ void init_bus (void) {
 
   random_init ((unsigned int)123456789);
 
-  /* TODO: Initialize global/static variables,
-     e.g. your condition variables, locks, counters etc */
+  lock_init(&bus_lock);
 
-  // l1 = malloc(sizeof *l1)
-  lock_init(&l1);
-  cond_init(&c1[0]);
-  cond_init(&c1[1]);
-  cond_init(&c2[0]);
-  cond_init(&c2[1]);
+  cond_init(&c_prio[0]);
+  cond_init(&c_prio[1]);
+  cond_init(&c_norm[0]);
+  cond_init(&c_norm[1]);
 
   on_bus = 0;
   current_direction = -1; /* Bus yet to be used */
-  waitersNormal[0] = waitersNormal[1] = 0; /* waiters[] counts PRIORITY waiters per direction */
-  waitersPriority[0] = waitersPriority[1] = 0;
+  waiters_normal[0] = waiters_normal[1] = 0; /* waiters[] counts PRIORITY waiters per direction */
+  waiters_priority[0] = waiters_priority[1] = 0;
 }
 
 void batch_scheduler (unsigned int num_priority_send,
@@ -201,44 +197,28 @@ static direction_t other_direction(direction_t this_direction) {
 
 
 void get_slot (const task_t *task) {
+  lock_acquire(&bus_lock);
+  /* If the task has PRIORITY. */
+  if (task->priority == PRIORITY){
+    waiters_priority[task->direction]++;
+    while ((on_bus == 3) || /* The bus is full (on_bus == 3). */
+           (on_bus > 0 && current_direction != task->direction) ) /* The bus is in use by the opposite direction. */
+      cond_wait(&c_prio[task->direction],&bus_lock);
+    waiters_priority[task->direction]--;
+  }
+  /* Else, the task has NORMAL priority */
+  else{
+    waiters_normal[task->direction]++;
+    while ((on_bus == 3) || /* The bus is full. */
+           (on_bus > 0 && current_direction != task->direction) || /* The bus is in use by the opposite direction. */
+           ((waiters_priority[0] > 0) || waiters_priority[1] > 0)) /* There are ANY priority tasks waiting (in either direction). */
+      cond_wait(&c_norm[task->direction], &bus_lock);
+    waiters_normal[task->direction]--;
+  }
 
-  /* TODO: Try to get a slot, respect the following rules:
-   *        1. There can be only BUS_CAPACITY tasks using the bus
-   *        2. The bus is half-duplex: All tasks using the bus should be either
-   * sending or receiving
-   *        3. A normal task should not get the bus if there are priority tasks
-   * waiting
-   *
-   * You do not need to guarantee fairness or freedom from starvation:
-   * feel free to schedule priority tasks of the same direction,
-   * even if there are priority tasks of the other direction waiting
-   */
-
-  lock_acquire(&l1);
-  
-  //while ((on_bus == 3) || (on_bus > 0 && current_direction != task->direction) || (task->priority == NORMAL && (waitersPriority[0] > 0) || waitersPriority[1] > 0)) { // while can't get on the bridge, wait
-    
-    if (task->priority == PRIORITY){
-      waitersPriority[task->direction]++;
-      while ((on_bus == 3) || (on_bus > 0 && current_direction != task->direction) )
-        cond_wait(&c1[task->direction],&l1);
-      waitersPriority[task->direction]--;
-
-    }
-
-    else{
-      waitersNormal[task->direction]++;
-      while ((on_bus == 3) || (on_bus > 0 && current_direction != task->direction) || ((waitersPriority[0] > 0) || waitersPriority[1] > 0))
-        cond_wait(&c2[task->direction], &l1);
-    
-      waitersNormal[task->direction]--;
-    }
-    
- //}
-
-  on_bus++; // get on the bridge
+  on_bus++; /* Get on the bridge. */
   current_direction = task->direction;
-  lock_release(&l1);
+  lock_release(&bus_lock);
 }
 
 void transfer_data (const task_t *task) {
@@ -247,40 +227,42 @@ void transfer_data (const task_t *task) {
 }
 
 void release_slot (const task_t *task) {
+  lock_acquire(&bus_lock);
 
-  /* TODO: Release the slot, think about the actions you need to perform:
-   *       - Do you need to notify any waiting task?
-   *       - Do you need to increment/decrement any counter?
-   */
-
-
-
-  lock_acquire(&l1);
-  if(on_bus > 0)
-  on_bus--; // get off the bridge
+  /* Decrease the number on the bus */
+  on_bus--; 
+  
+  /* Store the directions of the task. */
   int d = task->direction; 
+  
+  /* If there are still tasks on the bus after this one leaves,
+     we can only allow more tasks of the same direction to enter.
+  */
   if(on_bus > 0){
-    if (waitersPriority[d] > 0){
-      cond_signal(&c1[d], &l1);
+    // If there are PRIORITY tasks waiting in the same direction, wake one
+    if (waiters_priority[d] > 0){
+      cond_signal(&c_prio[d], &bus_lock);
     }  
   }
+  /* If the bus is empty (on_bus == 0), we get to choose
+     which direction (and priority) to serve next. */
     else
   {
-    if (waitersPriority[1-d] > 0){
+    /* PRIORITY tasks in the opposite direction. */
+    if (waiters_priority[1-d] > 0){
       current_direction = 1-d;
-      cond_broadcast(&c1[1-d],&l1);
+      cond_broadcast(&c_prio[1-d],&bus_lock);
     }
-    else if (waitersNormal[d] > 0){
-      cond_signal(&c2[d], &l1);
+    /* NORMAL tasks in the same  direction. */
+    else if (waiters_normal[d] > 0){
+      cond_signal(&c_norm[d], &bus_lock);
     }  
-  
-    else if (waitersNormal[1-d] > 0){
+    /* NORMAL tasks in the oppisite direction. */
+    else if (waiters_normal[1-d] > 0){
       current_direction = 1-d;
-      cond_broadcast(&c2[1-d],&l1);
+      cond_broadcast(&c_norm[1-d],&bus_lock);
     }
-
   }
 
-  lock_release(&l1);
-
-  }
+  lock_release(&bus_lock);
+}
