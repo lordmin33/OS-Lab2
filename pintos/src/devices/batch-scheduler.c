@@ -91,12 +91,12 @@ void init_bus (void) {
 
   random_init ((unsigned int)123456789);
 
-  lock_init(&bus_lock);
+  lock_init (&bus_lock);
 
-  cond_init(&c_prio[0]);
-  cond_init(&c_prio[1]);
-  cond_init(&c_norm[0]);
-  cond_init(&c_norm[1]);
+  cond_init (&c_prio[0]);
+  cond_init (&c_prio[1]);
+  cond_init (&c_norm[0]);
+  cond_init (&c_norm[1]);
 
   on_bus = 0;
   current_direction = -1; /* Bus yet to be used */
@@ -196,14 +196,16 @@ static direction_t other_direction(direction_t this_direction) {
 }
 
 
-void get_slot (const task_t *task) {
-  lock_acquire(&bus_lock);
+void get_slot (const task_t *task) 
+{
+  lock_acquire (&bus_lock);
   /* If the task has PRIORITY. */
-  if (task->priority == PRIORITY){
+  if (task->priority == PRIORITY)
+  {
     waiters_priority[task->direction]++;
     while ((on_bus == 3) || /* The bus is full (on_bus == 3). */
            (on_bus > 0 && current_direction != task->direction) ) /* The bus is in use by the opposite direction. */
-      cond_wait(&c_prio[task->direction],&bus_lock);
+      cond_wait (&c_prio[task->direction],&bus_lock);
     waiters_priority[task->direction]--;
   }
   /* Else, the task has NORMAL priority */
@@ -212,13 +214,13 @@ void get_slot (const task_t *task) {
     while ((on_bus == 3) || /* The bus is full. */
            (on_bus > 0 && current_direction != task->direction) || /* The bus is in use by the opposite direction. */
            ((waiters_priority[0] > 0) || waiters_priority[1] > 0)) /* There are ANY priority tasks waiting (in either direction). */
-      cond_wait(&c_norm[task->direction], &bus_lock);
+      cond_wait (&c_norm[task->direction], &bus_lock);
     waiters_normal[task->direction]--;
   }
 
   on_bus++; /* Get on the bridge. */
   current_direction = task->direction;
-  lock_release(&bus_lock);
+  lock_release (&bus_lock);
 }
 
 void transfer_data (const task_t *task) {
@@ -227,9 +229,11 @@ void transfer_data (const task_t *task) {
 }
 
 void release_slot (const task_t *task) {
-  lock_acquire(&bus_lock);
+  lock_acquire (&bus_lock);
 
-  /* Decrease the number on the bus */
+  /* Decrease the number on the bus 
+     if there is anyone on teh bus.*/
+  if(on_bus > 0)
   on_bus--; 
   
   /* Store the directions of the task. */
@@ -238,10 +242,12 @@ void release_slot (const task_t *task) {
   /* If there are still tasks on the bus after this one leaves,
      we can only allow more tasks of the same direction to enter.
   */
-  if(on_bus > 0){
+  if (on_bus > 0)
+  {
     // If there are PRIORITY tasks waiting in the same direction, wake one
-    if (waiters_priority[d] > 0){
-      cond_signal(&c_prio[d], &bus_lock);
+    if (waiters_priority[d] > 0)
+    {
+      cond_signal (&c_prio[d], &bus_lock);
     }  
   }
   /* If the bus is empty (on_bus == 0), we get to choose
@@ -249,18 +255,21 @@ void release_slot (const task_t *task) {
     else
   {
     /* PRIORITY tasks in the opposite direction. */
-    if (waiters_priority[1-d] > 0){
+    if (waiters_priority[1-d] > 0)
+    {
       current_direction = 1-d;
-      cond_broadcast(&c_prio[1-d],&bus_lock);
+      cond_broadcast (&c_prio[1-d],&bus_lock);
     }
     /* NORMAL tasks in the same  direction. */
-    else if (waiters_normal[d] > 0){
-      cond_signal(&c_norm[d], &bus_lock);
+    else if (waiters_normal[d] > 0)
+    {
+      cond_signal (&c_norm[d], &bus_lock);
     }  
     /* NORMAL tasks in the oppisite direction. */
-    else if (waiters_normal[1-d] > 0){
+    else if (waiters_normal[1-d] > 0)
+    {
       current_direction = 1-d;
-      cond_broadcast(&c_norm[1-d],&bus_lock);
+      cond_broadcast (&c_norm[1-d],&bus_lock);
     }
   }
 
